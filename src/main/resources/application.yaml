@@ -25,3 +25,10 @@ mybatis-plus:
 logging:
   level:
     com.hmdp: debug
+
+# token 相关配置
+hmdp:
+  token:
+    header-name: authorization   # 前端携带token的请求头字段名
+    key-prefix: "login:token:"   # Redis中token的key前缀
+    ttl-minutes: 36000           # token有效期(分钟)
