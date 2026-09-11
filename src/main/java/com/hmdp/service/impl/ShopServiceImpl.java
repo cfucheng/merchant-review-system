@@ -46,10 +46,17 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
         if (StrUtil.isNotBlank(cacheShop)) {
             return Result.ok(JSONUtil.toBean(cacheShop, Shop.class));
         }
+        // 如果cacheShop为空值 则不去查数据库
+        if (cacheShop != null){
+            return Result.fail("店铺不存在");
+        }
+
         // 3.不存在，根据id查询数据库
         Shop shop = getById(id);
         // 4.数据库不存在，返回错误
         if (shop == null) {
+            // 解决缓存穿透 将空值写入缓存
+            stringRedisTemplate.opsForValue().set(key, "",RedisConstants.CACHE_NULL_TTL, TimeUnit.MINUTES);
             return Result.fail("店铺不存在");
         }
         // 5.数据库存在，写入redis并返回
