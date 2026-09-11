@@ -5,9 +5,11 @@ import cn.hutool.core.util.StrUtil;
 import com.hmdp.config.TokenProperties;
 import com.hmdp.dto.UserDTO;
 import com.hmdp.utils.UserHolder;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
+import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.HandlerInterceptor;
 
 import javax.servlet.http.HttpServletRequest;
@@ -22,6 +24,7 @@ import java.util.concurrent.TimeUnit;
  *@Version: 1.0
  */
 @Component
+@Slf4j
 public class RefreshTokenInterceptor implements HandlerInterceptor {
     @Autowired
     private StringRedisTemplate stringRedisTemplate;
@@ -32,6 +35,7 @@ public class RefreshTokenInterceptor implements HandlerInterceptor {
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
         // 1.从请求头中获取token
         String token = request.getHeader(tokenProperties.getHeaderName());
+        log.info("登录token: {}", token);
         if (StrUtil.isBlank(token)) {//判断是否为空
            return true;
         }
