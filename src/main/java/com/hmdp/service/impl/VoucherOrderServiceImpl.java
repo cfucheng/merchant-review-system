@@ -8,9 +8,11 @@ import com.hmdp.service.ISeckillVoucherService;
 import com.hmdp.service.IVoucherOrderService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.utils.RedisWorker;
+import com.hmdp.utils.SimpleRedisLock;
 import com.hmdp.utils.UserHolder;
 import org.springframework.aop.framework.AopContext;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -31,6 +33,10 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     private ISeckillVoucherService seckillVoucherService;
     @Autowired
     private RedisWorker redisWorker;
+    @Autowired
+    private StringRedisTemplate stringRedisTemplate;
+    @Autowired
+    private SimpleRedisLock simpleRedisLock;
 
 
     @Override
@@ -57,6 +63,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 
         // 5.获取当前登录用户id
         Long userId = UserHolder.getUser().getId();
+/*        集群下会失效
         // 6.对同一用户加锁，保证一人一单的线程安全
         //   userId.toString().intern() 保证同一用户获取到同一把锁，不同用户之间不互斥
         synchronized (userId.toString().intern()) {
@@ -64,6 +71,24 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
             IVoucherOrderService proxy = (IVoucherOrderService) AopContext.currentProxy();
             // 8.通过代理对象调用，确保事务正常生效，创建优惠券订单
             return proxy.createVoucherOrder(voucherId);
+        }*/
+
+        //使用redis分布式锁
+        // 1.获取锁
+        simpleRedisLock = new SimpleRedisLock(stringRedisTemplate, "order:" + userId);
+        boolean isLock = simpleRedisLock.tryLock(10000);
+        // 2.判断是否获取锁成功
+        if (!isLock) {
+            // 2.1获取锁失败 返回错误信息或重试
+            return Result.fail("请勿重复下单");
+        }
+        // 2.2获取锁成功
+        try {
+            IVoucherOrderService proxy = (IVoucherOrderService) AopContext.currentProxy();
+            return proxy.createVoucherOrder(voucherId);
+        } finally {
+            // 3.释放锁
+            simpleRedisLock.unlock();
         }
     }
 
