@@ -27,8 +27,7 @@ public interface IVoucherOrderService extends IService<VoucherOrder> {
      * 包含一人一单校验、扣减库存、创建订单
      * 注意：必须通过AOP代理对象调用，否则@Transactional注解不生效
      *
-     * @param voucherId 优惠券id
-     * @return 成功返回订单id，失败返回错误信息
+     * @param voucherOrder 优惠券id
      */
-    Result createVoucherOrder(Long voucherId);
+    void createVoucherOrder(VoucherOrder voucherOrder);
 }

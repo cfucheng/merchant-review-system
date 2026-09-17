@@ -43,8 +43,6 @@ public class SimpleRedisLock implements ILock {
         UNLOCK_SCRIPT = new DefaultRedisScript<>();
         UNLOCK_SCRIPT.setLocation(new ClassPathResource("unlock.lua"));
         UNLOCK_SCRIPT.setResultType(Long.class);
-
-
     }
 
 
