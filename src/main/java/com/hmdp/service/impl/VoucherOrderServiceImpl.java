@@ -85,6 +85,13 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
      */
     @PostConstruct
     public void init() {
+        // 1. 尝试创建消费者组（如果队列不存在，MKSTREAM会自动创建队列）
+        try {
+            stringRedisTemplate.opsForStream().createGroup("stream.orders", "g1");
+        } catch (Exception e) {
+            log.info("消费者组已存在，无需创建");
+        }
+        // 2. 启动后台线程池
         SECKILL_ORDER_EXECUTOR.submit(new VoucherOrderHandler());
     }
 
@@ -112,18 +119,19 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
                     MapRecord<String, Object, Object> record = list.get(0);
                     Map<Object, Object> values = record.getValue();
                     VoucherOrder voucherOrder = BeanUtil.fillBeanWithMap(values, new VoucherOrder(), true);
+                    // 2.3创建订单
                     handleVoucherOrder(voucherOrder);
                     // 3.ACK确认
                     stringRedisTemplate.opsForStream().acknowledge(queueName, "g1", record.getId());
                 } catch (Exception e) {
                     log.error("处理订单异常", e);
-                    handlePingList();
+                    handlePendingList();
                 }
             }
         }
     }
 
-    private void handlePingList() {
+    private void handlePendingList() {
         while (true) {
             try {
                 // 1.获取消息队列中的订单消息
