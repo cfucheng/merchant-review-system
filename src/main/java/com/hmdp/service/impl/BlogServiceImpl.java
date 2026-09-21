@@ -1,6 +1,8 @@
 package com.hmdp.service.impl;
 
+import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.BooleanUtil;
+import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.hmdp.dto.Result;
 import com.hmdp.dto.UserDTO;
@@ -12,12 +14,19 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.service.IUserService;
 import com.hmdp.utils.SystemConstants;
 import com.hmdp.utils.UserHolder;
+import jodd.util.StringUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+import static com.hmdp.utils.RedisConstants.BLOG_LIKED_KEY;
 
 /**
  * <p>
@@ -44,16 +53,16 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
     public Result likeBlog(Long id) {
         // 1.获取当前用户id
         Long userId = UserHolder.getUser().getId();
-        String key = "blog:liked" + id;
+        String key = BLOG_LIKED_KEY + id;
         // 2.判断用户是否已经点过赞了
-        boolean isMember = stringRedisTemplate.opsForSet().isMember(key, userId.toString());
-        if (BooleanUtil.isFalse(isMember)) {
+        Double score = stringRedisTemplate.opsForZSet().score(key, userId.toString());
+        if (score == null) {
             // 3未点赞 可以点赞
             // 3.1数据库字段+1 update set tb_blog liked = liked + 1 where id = id
             boolean isSuccess = update().setSql("liked = liked + 1").eq("id", id).update();
             // 3.2redis集合中添加用户id
-            if (isSuccess){
-                stringRedisTemplate.opsForSet().add(key, userId.toString());
+            if (isSuccess) {
+                stringRedisTemplate.opsForZSet().add(key, userId.toString(), System.currentTimeMillis());
             }
         } else {
             // 4.已点赞 取消点赞
@@ -61,10 +70,33 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
             boolean isSuccess = update().setSql("liked = liked - 1").eq("id", id).update();
             if (isSuccess) {
                 // 4.2redis集合中移除用户id
-                stringRedisTemplate.opsForSet().remove(key, userId.toString());
+                stringRedisTemplate.opsForZSet().remove(key, userId.toString());
             }
         }
         return Result.ok();
+    }
+
+    @Override
+    public Result queryBlogLikes(Long id) {
+        String key = BLOG_LIKED_KEY + id;
+        // 1.查询top5点赞的用户
+        Set<String> top5 = stringRedisTemplate.opsForZSet().range(key, 0, 4);
+        if (top5 == null || top5.isEmpty()) {
+            return Result.ok(Collections.emptyList());
+        }
+        // 2.解析出其中的用户id
+        List<Long> ids = top5.stream().map(Long::valueOf).collect(Collectors.toList());
+        String idStr = StrUtil.join(",", ids);
+        // 3.根据id查询用户
+        List<User> users = userService.query().in("id", ids).last("ORDER BY FIELD(id," + idStr + ")").list();
+
+        List<UserDTO> userDTOS = new ArrayList<>();
+        for (User user : users) {
+            UserDTO userDTO = BeanUtil.copyProperties(user, UserDTO.class);
+            userDTOS.add(userDTO);
+        }
+        // 4.返回
+        return Result.ok(userDTOS);
     }
 
     /**
@@ -113,14 +145,13 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
         // 1.获取当前用户
         UserDTO user = UserHolder.getUser();
         if (user == null) {
-            blog.setIsLike(false);
             return;
         }
         Long userId = user.getId();
-        String key = "blog:liked" + blog.getId();
+        String key = BLOG_LIKED_KEY + blog.getId();
         // 2.判断用户是否已经点过赞了
-        boolean isMember = stringRedisTemplate.opsForSet().isMember(key, userId.toString());
-        blog.setIsLike(BooleanUtil.isTrue(isMember));
+        Double score = stringRedisTemplate.opsForZSet().score(key, userId.toString());
+        blog.setIsLike(score != null);
     }
 
     /**
