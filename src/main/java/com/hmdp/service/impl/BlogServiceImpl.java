@@ -49,9 +49,8 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
     private StringRedisTemplate stringRedisTemplate;
     @Resource
     private IFollowService followService;
-    @Resource
-    private IBlogService blogService;
 
+    /**
 
     /**
      * 给博客点赞

@@ -23,6 +23,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import javax.annotation.PostConstruct;
+import javax.annotation.PreDestroy;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.List;
@@ -58,6 +59,8 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     private RedissonClient redissonClient;
 
     private IVoucherOrderService proxy;
+    
+    private volatile boolean running = true;
 
     /**
      * 加载Lua脚本：执行脚本保证原子性操作
@@ -94,6 +97,22 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         // 2. 启动后台线程池
         SECKILL_ORDER_EXECUTOR.submit(new VoucherOrderHandler());
     }
+    
+    @PreDestroy
+    public void destroy() {
+        log.info("开始关闭订单处理线程...");
+        running = false;
+        SECKILL_ORDER_EXECUTOR.shutdown();
+        try {
+            if (!SECKILL_ORDER_EXECUTOR.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS)) {
+                SECKILL_ORDER_EXECUTOR.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            SECKILL_ORDER_EXECUTOR.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+        log.info("订单处理线程已关闭");
+    }
 
     String queueName = "stream.orders";
     public class VoucherOrderHandler implements Runnable {
@@ -102,7 +121,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         // 不断从消息队列取订单
         @Override
         public void run() {
-            while (true) {
+            while (running) {
                 try {
                     // 1.获取消息队列中的订单消息
                     List<MapRecord<String, Object, Object>> list = stringRedisTemplate.opsForStream().read(
@@ -124,6 +143,10 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
                     // 3.ACK确认
                     stringRedisTemplate.opsForStream().acknowledge(queueName, "g1", record.getId());
                 } catch (Exception e) {
+                    if (!running) {
+                        log.info("应用正在关闭，退出订单处理循环");
+                        break;
+                    }
                     log.error("处理订单异常", e);
                     handlePendingList();
                 }
@@ -132,7 +155,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     }
 
     private void handlePendingList() {
-        while (true) {
+        while (running) {
             try {
                 // 1.获取消息队列中的订单消息
                 List<MapRecord<String, Object, Object>> list = stringRedisTemplate.opsForStream().read(
@@ -153,11 +176,17 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
                 // 3.ACK确认
                 stringRedisTemplate.opsForStream().acknowledge(queueName, "g1", record.getId());
             } catch (Exception e) {
+                if (!running) {
+                    log.info("应用正在关闭，退出Pending-List处理循环");
+                    break;
+                }
                 log.error("处理Ping-List异常", e);
                 try {
                     sleep(20);
                 } catch (InterruptedException ex) {
-                    throw new RuntimeException(ex);
+                    Thread.currentThread().interrupt();
+                    log.warn("处理Pending-List线程被中断");
+                    break;
                 }
             }
         }
